@@ -138,18 +138,15 @@ export default function ScanAttendance() {
         const html5QrcodeScanner = new Html5QrcodeScanner(
           "qr-scanner",
           { 
-            fps: 20, // Increased for faster detection
-            qrbox: { width: 300, height: 300 }, // Larger detection area
+            fps: 15, // Balanced FPS for good performance
+            qrbox: { width: 250, height: 250 }, // Standard detection area
             aspectRatio: 1.0,
             rememberLastUsedCamera: true,
             supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-            videoConstraints: {
-              facingMode: "environment" // Use back camera by default
-            },
+            // Remove strict back camera requirement to allow any available camera
             formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-            experimentalFeatures: {
-              useBarCodeDetectorIfSupported: true
-            }
+            showTorchButtonIfSupported: true,
+            showZoomSliderIfSupported: true
           },
           false
         )
@@ -159,9 +156,9 @@ export default function ScanAttendance() {
       } catch (error) {
         console.error('Error initializing QR scanner:', error)
         setIsScanning(false)
-        toast.error('Failed to initialize camera. Please check permissions.')
+        toast.error('Failed to initialize camera. Please check permissions and try again.')
       }
-    }, 100)
+    }, 200) // Slightly longer delay for better DOM readiness
   }
 
   const stopScanning = () => {
@@ -179,11 +176,6 @@ export default function ScanAttendance() {
 
   const onScanSuccess = async (decodedText) => {
     try {
-      // Temporarily pause scanner to prevent multiple scans
-      if (scanner) {
-        scanner.pause()
-      }
-
       // Extract school_id from QR code
       let schoolId
       
@@ -197,10 +189,6 @@ export default function ScanAttendance() {
 
       if (!schoolId) {
         toast.error('Invalid QR code format')
-        // Resume scanner after error
-        if (scanner) {
-          setTimeout(() => scanner.resume(), 1000)
-        }
         return
       }
 
@@ -213,35 +201,23 @@ export default function ScanAttendance() {
 
       if (studentError || !student) {
         toast.error(`Student with ID ${schoolId} not found`)
-        // Resume scanner after error
-        if (scanner) {
-          setTimeout(() => scanner.resume(), 1000)
-        }
         return
       }
 
-      // Check if already scanned today
-      const today = new Date().toISOString().split('T')[0]
-      const { data: existingAttendance } = await supabase
-        .from('attendance')
-        .select('id')
-        .eq('student_id', student.id)
-        .gte('scanned_at', `${today}T00:00:00.000Z`)
-        .lt('scanned_at', `${today}T23:59:59.999Z`)
+      // Check if already scanned today (for regular attendance)
+      if (!selectedEvent) {
+        const today = new Date().toISOString().split('T')[0]
+        const { data: existingAttendance } = await supabase
+          .from('attendance')
+          .select('id')
+          .eq('student_id', student.id)
+          .gte('scanned_at', `${today}T00:00:00.000Z`)
+          .lt('scanned_at', `${today}T23:59:59.999Z`)
 
-      if (existingAttendance && existingAttendance.length > 0) {
-        toast.error(`${student.first_name} ${student.last_name} already marked present today`)
-        // Resume scanner after error
-        if (scanner) {
-          setTimeout(() => scanner.resume(), 1000)
+        if (existingAttendance && existingAttendance.length > 0) {
+          toast.error(`${student.first_name} ${student.last_name} already marked present today`)
+          return
         }
-        return
-      }
-
-      // Record attendance
-      const attendanceData = {
-        student_id: student.id,
-        scanned_at: new Date().toISOString()
       }
 
       // Check if scanning for a specific event
@@ -255,10 +231,6 @@ export default function ScanAttendance() {
 
         if (existingEventAttendance && existingEventAttendance.length > 0) {
           toast.error(`${student.first_name} ${student.last_name} already checked in to this event`)
-          // Resume scanner after error
-          if (scanner) {
-            setTimeout(() => scanner.resume(), 1000)
-          }
           return
         }
 
@@ -281,7 +253,10 @@ export default function ScanAttendance() {
         // Regular daily attendance
         const { error: attendanceError } = await supabase
           .from('attendance')
-          .insert(attendanceData)
+          .insert({
+            student_id: student.id,
+            scanned_at: new Date().toISOString()
+          })
 
         if (attendanceError) throw attendanceError
 
@@ -290,19 +265,10 @@ export default function ScanAttendance() {
         // Refresh attendance data
         fetchTodayAttendance()
       }
-
-      // Resume scanner after successful scan
-      if (scanner) {
-        setTimeout(() => scanner.resume(), 2000) // Wait 2 seconds before resuming
-      }
       
     } catch (error) {
       console.error('Scan processing error:', error)
       toast.error('Error processing scan')
-      // Resume scanner after error
-      if (scanner) {
-        setTimeout(() => scanner.resume(), 1000)
-      }
     }
   }
 
@@ -460,8 +426,8 @@ export default function ScanAttendance() {
                 <div 
                   id="qr-scanner" 
                   ref={scannerRef}
-                  className="mb-4 w-full rounded-lg overflow-hidden bg-black"
-                  style={{ minHeight: '350px' }}
+                  className="mb-4 w-full rounded-lg overflow-hidden"
+                  style={{ minHeight: '350px', backgroundColor: '#f3f4f6' }}
                 ></div>
                 <div className="text-center space-y-2">
                   <button
