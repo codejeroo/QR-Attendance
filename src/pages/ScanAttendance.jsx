@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Html5QrcodeScanner } from 'html5-qrcode'
 import { supabase } from '../lib/supabase'
 import { QrCode, Camera, CheckCircle, XCircle, Users, Clock, Calendar, KeyboardIcon } from 'lucide-react'
@@ -14,6 +14,7 @@ export default function ScanAttendance() {
   const [eventAttendance, setEventAttendance] = useState([])
   const [manualInput, setManualInput] = useState('')
   const [showManualInput, setShowManualInput] = useState(false)
+  const scannerRef = useRef(null)
 
   useEffect(() => {
     fetchTodayAttendance()
@@ -21,11 +22,15 @@ export default function ScanAttendance() {
     
     // Cleanup scanner on unmount
     return () => {
-      if (scanner) {
-        scanner.clear()
+      try {
+        if (scanner) {
+          scanner.clear()
+        }
+      } catch (error) {
+        console.error('Error cleaning up scanner:', error)
       }
     }
-  }, [])
+  }, [scanner]) // Add scanner as dependency
 
   const fetchTodayAttendance = async () => {
     try {
@@ -116,27 +121,51 @@ export default function ScanAttendance() {
   }, [selectedEvent])
 
   const startScanning = () => {
-    const html5QrcodeScanner = new Html5QrcodeScanner(
-      "qr-scanner",
-      { 
-        fps: 10, 
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0
-      },
-      false
-    )
-
-    html5QrcodeScanner.render(onScanSuccess, onScanError)
-    setScanner(html5QrcodeScanner)
     setIsScanning(true)
+    
+    // Use setTimeout to ensure DOM is updated before initializing scanner
+    setTimeout(() => {
+      const scannerElement = scannerRef.current || document.getElementById("qr-scanner")
+      
+      if (!scannerElement) {
+        console.error('QR scanner element not found')
+        setIsScanning(false)
+        toast.error('QR scanner initialization failed')
+        return
+      }
+
+      try {
+        const html5QrcodeScanner = new Html5QrcodeScanner(
+          "qr-scanner",
+          { 
+            fps: 10, 
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+          },
+          false
+        )
+
+        html5QrcodeScanner.render(onScanSuccess, onScanError)
+        setScanner(html5QrcodeScanner)
+      } catch (error) {
+        console.error('Error initializing QR scanner:', error)
+        setIsScanning(false)
+        toast.error('Failed to initialize camera. Please check permissions.')
+      }
+    }, 100) // Small delay to ensure DOM is ready
   }
 
   const stopScanning = () => {
-    if (scanner) {
-      scanner.clear()
-      setScanner(null)
+    try {
+      if (scanner) {
+        scanner.clear()
+        setScanner(null)
+      }
+    } catch (error) {
+      console.error('Error stopping scanner:', error)
+    } finally {
+      setIsScanning(false)
     }
-    setIsScanning(false)
   }
 
   const onScanSuccess = async (decodedText) => {
@@ -390,7 +419,11 @@ export default function ScanAttendance() {
               </div>
             ) : (
               <div>
-                <div id="qr-scanner" className="mb-4"></div>
+                <div 
+                  id="qr-scanner" 
+                  ref={scannerRef}
+                  className="mb-4 min-h-[300px] w-full"
+                ></div>
                 <div className="text-center space-y-2">
                   <button
                     onClick={stopScanning}
