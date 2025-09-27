@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Html5QrcodeScanner, Html5QrcodeScanType, Html5QrcodeSupportedFormats } from 'html5-qrcode'
+import { Html5QrcodeScanner } from 'html5-qrcode'
 import { supabase } from '../lib/supabase'
 import { QrCode, Camera, CheckCircle, XCircle, Users, Clock, Calendar, KeyboardIcon } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -14,6 +14,8 @@ export default function ScanAttendance() {
   const [eventAttendance, setEventAttendance] = useState([])
   const [manualInput, setManualInput] = useState('')
   const [showManualInput, setShowManualInput] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingStudent, setProcessingStudent] = useState(null)
   const scannerRef = useRef(null)
 
   useEffect(() => {
@@ -36,11 +38,13 @@ export default function ScanAttendance() {
     try {
       const today = new Date().toISOString().split('T')[0]
       
+      // Get unique attendance records for today (prevent duplicates in count)
       const { data: attendanceData, error } = await supabase
         .from('attendance')
         .select(`
           id,
           scanned_at,
+          student_id,
           students (
             school_id,
             first_name,
@@ -53,7 +57,12 @@ export default function ScanAttendance() {
 
       if (error) throw error
 
-      setTodayAttendance(attendanceData || [])
+      // Remove duplicate entries by student_id to prevent counting the same student multiple times
+      const uniqueAttendance = attendanceData?.filter((record, index, arr) => 
+        arr.findIndex(r => r.student_id === record.student_id) === index
+      ) || []
+
+      setTodayAttendance(uniqueAttendance)
 
       // Get total student count
       const { count: totalStudents } = await supabase
@@ -62,7 +71,7 @@ export default function ScanAttendance() {
 
       setStats({
         total: totalStudents || 0,
-        present: attendanceData?.length || 0
+        present: uniqueAttendance.length || 0
       })
     } catch (error) {
       console.error('Error fetching attendance:', error)
@@ -135,19 +144,18 @@ export default function ScanAttendance() {
       }
 
       try {
+        // Clear any existing scanner content
+        scannerElement.innerHTML = ''
+        
+        const config = {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0
+        }
+
         const html5QrcodeScanner = new Html5QrcodeScanner(
           "qr-scanner",
-          { 
-            fps: 15, // Balanced FPS for good performance
-            qrbox: { width: 250, height: 250 }, // Standard detection area
-            aspectRatio: 1.0,
-            rememberLastUsedCamera: true,
-            supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-            // Remove strict back camera requirement to allow any available camera
-            formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-            showTorchButtonIfSupported: true,
-            showZoomSliderIfSupported: true
-          },
+          config,
           false
         )
 
@@ -156,9 +164,9 @@ export default function ScanAttendance() {
       } catch (error) {
         console.error('Error initializing QR scanner:', error)
         setIsScanning(false)
-        toast.error('Failed to initialize camera. Please check permissions and try again.')
+        toast.error('Failed to initialize camera. Please allow camera access and try again.')
       }
-    }, 200) // Slightly longer delay for better DOM readiness
+    }, 300)
   }
 
   const stopScanning = () => {
@@ -175,7 +183,14 @@ export default function ScanAttendance() {
   }
 
   const onScanSuccess = async (decodedText) => {
+    // Prevent multiple rapid scans
+    if (isProcessing) {
+      return
+    }
+
     try {
+      setIsProcessing(true)
+      
       // Extract school_id from QR code
       let schoolId
       
@@ -189,8 +204,15 @@ export default function ScanAttendance() {
 
       if (!schoolId) {
         toast.error('Invalid QR code format')
+        setIsProcessing(false)
         return
       }
+
+      // Show scanning animation
+      setProcessingStudent({ school_id: schoolId, status: 'scanning' })
+
+      // Add a delay to show the scanning animation
+      await new Promise(resolve => setTimeout(resolve, 1500))
 
       // Check if student exists
       const { data: student, error: studentError } = await supabase
@@ -200,9 +222,19 @@ export default function ScanAttendance() {
         .single()
 
       if (studentError || !student) {
+        setProcessingStudent({ school_id: schoolId, status: 'error' })
+        await new Promise(resolve => setTimeout(resolve, 1000))
         toast.error(`Student with ID ${schoolId} not found`)
+        setProcessingStudent(null)
+        setIsProcessing(false)
         return
       }
+
+      // Update processing status with student info
+      setProcessingStudent({ 
+        ...student, 
+        status: 'checking' 
+      })
 
       // Check if already scanned today (for regular attendance)
       if (!selectedEvent) {
@@ -215,7 +247,11 @@ export default function ScanAttendance() {
           .lt('scanned_at', `${today}T23:59:59.999Z`)
 
         if (existingAttendance && existingAttendance.length > 0) {
+          setProcessingStudent({ ...student, status: 'duplicate' })
+          await new Promise(resolve => setTimeout(resolve, 1000))
           toast.error(`${student.first_name} ${student.last_name} already marked present today`)
+          setProcessingStudent(null)
+          setIsProcessing(false)
           return
         }
       }
@@ -230,7 +266,11 @@ export default function ScanAttendance() {
           .eq('student_id', student.id)
 
         if (existingEventAttendance && existingEventAttendance.length > 0) {
+          setProcessingStudent({ ...student, status: 'duplicate' })
+          await new Promise(resolve => setTimeout(resolve, 1000))
           toast.error(`${student.first_name} ${student.last_name} already checked in to this event`)
+          setProcessingStudent(null)
+          setIsProcessing(false)
           return
         }
 
@@ -245,12 +285,14 @@ export default function ScanAttendance() {
 
         if (eventAttendanceError) throw eventAttendanceError
 
+        setProcessingStudent({ ...student, status: 'success' })
+        await new Promise(resolve => setTimeout(resolve, 1000))
         toast.success(`✅ ${student.first_name} ${student.last_name} checked in to ${selectedEvent.title}`)
         
         // Refresh event attendance
         fetchEventAttendance(selectedEvent.id)
       } else {
-        // Regular daily attendance
+        // Record regular daily attendance
         const { error: attendanceError } = await supabase
           .from('attendance')
           .insert({
@@ -260,15 +302,25 @@ export default function ScanAttendance() {
 
         if (attendanceError) throw attendanceError
 
+        setProcessingStudent({ ...student, status: 'success' })
+        await new Promise(resolve => setTimeout(resolve, 1000))
         toast.success(`✅ ${student.first_name} ${student.last_name} marked present`)
         
         // Refresh attendance data
         fetchTodayAttendance()
       }
+
+      // Clear processing state
+      setProcessingStudent(null)
+      setIsProcessing(false)
       
     } catch (error) {
       console.error('Scan processing error:', error)
+      setProcessingStudent(prev => prev ? { ...prev, status: 'error' } : null)
+      await new Promise(resolve => setTimeout(resolve, 1000))
       toast.error('Error processing scan')
+      setProcessingStudent(null)
+      setIsProcessing(false)
     }
   }
 
@@ -285,10 +337,14 @@ export default function ScanAttendance() {
       return
     }
 
-    // Use the same logic as QR scan
+    if (isProcessing) {
+      return
+    }
+
+    // Use the same logic as QR scan with processing state
     await onScanSuccess(manualInput.trim())
     
-    // Clear input after successful processing
+    // Clear input after processing is complete
     setManualInput('')
     setShowManualInput(false)
   }
@@ -422,13 +478,68 @@ export default function ScanAttendance() {
                 )}
               </div>
             ) : (
-              <div>
+              <div className="relative">
                 <div 
                   id="qr-scanner" 
                   ref={scannerRef}
                   className="mb-4 w-full rounded-lg overflow-hidden"
                   style={{ minHeight: '350px', backgroundColor: '#f3f4f6' }}
                 ></div>
+                
+                {/* Scanning Animation Overlay */}
+                {isProcessing && processingStudent && (
+                  <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg mb-4 fade-in-up">
+                    <div className="bg-white rounded-lg p-6 max-w-sm mx-4 text-center">
+                      {processingStudent.status === 'scanning' && (
+                        <>
+                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                          <p className="text-gray-900 font-medium">Scanning QR Code...</p>
+                          <p className="text-sm text-gray-500">ID: {processingStudent.school_id}</p>
+                        </>
+                      )}
+                      
+                      {processingStudent.status === 'checking' && (
+                        <>
+                          <div className="animate-pulse rounded-full h-12 w-12 bg-blue-100 flex items-center justify-center mx-auto mb-4">
+                            <Users className="h-6 w-6 text-blue-600" />
+                          </div>
+                          <p className="text-gray-900 font-medium">Verifying Student...</p>
+                          <p className="text-sm text-gray-500">{processingStudent.first_name} {processingStudent.last_name}</p>
+                        </>
+                      )}
+                      
+                      {processingStudent.status === 'success' && (
+                        <>
+                          <div className="rounded-full h-12 w-12 bg-green-100 flex items-center justify-center mx-auto mb-4">
+                            <CheckCircle className="h-6 w-6 text-green-600" />
+                          </div>
+                          <p className="text-gray-900 font-medium">Success!</p>
+                          <p className="text-sm text-gray-500">{processingStudent.first_name} {processingStudent.last_name} marked present</p>
+                        </>
+                      )}
+                      
+                      {processingStudent.status === 'duplicate' && (
+                        <>
+                          <div className="rounded-full h-12 w-12 bg-yellow-100 flex items-center justify-center mx-auto mb-4">
+                            <XCircle className="h-6 w-6 text-yellow-600" />
+                          </div>
+                          <p className="text-gray-900 font-medium">Already Present</p>
+                          <p className="text-sm text-gray-500">{processingStudent.first_name} {processingStudent.last_name}</p>
+                        </>
+                      )}
+                      
+                      {processingStudent.status === 'error' && (
+                        <>
+                          <div className="rounded-full h-12 w-12 bg-red-100 flex items-center justify-center mx-auto mb-4">
+                            <XCircle className="h-6 w-6 text-red-600" />
+                          </div>
+                          <p className="text-gray-900 font-medium">Error</p>
+                          <p className="text-sm text-gray-500">Please try again</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="text-center space-y-2">
                   <button
                     onClick={stopScanning}
