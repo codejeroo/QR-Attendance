@@ -6,3 +6,63 @@ body {
   margin: 0;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+/* QR Scanner Styling */
+#qr-scanner {
+  border-radius: 0.5rem;
+}
+
+/* Hide camera selection UI */
+#qr-scanner select {
+  display: none !important;
+}
+
+#qr-scanner__camera_selection {
+  display: none !important;
+}
+
+#qr-scanner__scan_region {
+  border-radius: 0.5rem !important;
+}
+
+/* Style the QR scanner video */
+#qr-scanner video {
+  border-radius: 0.5rem !important;
+  width: 100% !important;
+  height: auto !important;
+}
+
+/* Hide the dashboard region that shows camera info */
+#qr-scanner__dashboard {
+  display: none !important;
+}
+
+#qr-scanner__dashboard_section {
+  display: none !important;
+}
+
+/* Hide camera permission section if it appears */
+#qr-scanner__camera_permission_button {
+  background: #3B82F6 !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 0.375rem !important;
+  padding: 0.5rem 1rem !important;
+  font-size: 0.875rem !important;
+}
+
+/* Clean up the scanner area */
+#qr-scanner__header_message {
+  display: none !important;
+}
+
+#qr-scanner__status_span {
+  color: #10B981 !important;
+  font-weight: 500 !important;
+}
+
+/* Make the scan region more prominent */
+#qr-scanner__scan_region img {
+  border: 3px solid #10B981 !important;
+  border-radius: 0.5rem !important;
+}

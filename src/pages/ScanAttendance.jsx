@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Html5QrcodeScanner } from 'html5-qrcode'
+import { Html5QrcodeScanner, Html5QrcodeScanType, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 import { supabase } from '../lib/supabase'
 import { QrCode, Camera, CheckCircle, XCircle, Users, Clock, Calendar, KeyboardIcon } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -138,9 +138,18 @@ export default function ScanAttendance() {
         const html5QrcodeScanner = new Html5QrcodeScanner(
           "qr-scanner",
           { 
-            fps: 10, 
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0
+            fps: 20, // Increased for faster detection
+            qrbox: { width: 300, height: 300 }, // Larger detection area
+            aspectRatio: 1.0,
+            rememberLastUsedCamera: true,
+            supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+            videoConstraints: {
+              facingMode: "environment" // Use back camera by default
+            },
+            formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true
+            }
           },
           false
         )
@@ -152,7 +161,7 @@ export default function ScanAttendance() {
         setIsScanning(false)
         toast.error('Failed to initialize camera. Please check permissions.')
       }
-    }, 100) // Small delay to ensure DOM is ready
+    }, 100)
   }
 
   const stopScanning = () => {
@@ -170,8 +179,12 @@ export default function ScanAttendance() {
 
   const onScanSuccess = async (decodedText) => {
     try {
+      // Temporarily pause scanner to prevent multiple scans
+      if (scanner) {
+        scanner.pause()
+      }
+
       // Extract school_id from QR code
-      // Assuming QR code contains just the school_id or JSON with school_id
       let schoolId
       
       try {
@@ -184,6 +197,10 @@ export default function ScanAttendance() {
 
       if (!schoolId) {
         toast.error('Invalid QR code format')
+        // Resume scanner after error
+        if (scanner) {
+          setTimeout(() => scanner.resume(), 1000)
+        }
         return
       }
 
@@ -196,6 +213,10 @@ export default function ScanAttendance() {
 
       if (studentError || !student) {
         toast.error(`Student with ID ${schoolId} not found`)
+        // Resume scanner after error
+        if (scanner) {
+          setTimeout(() => scanner.resume(), 1000)
+        }
         return
       }
 
@@ -210,6 +231,10 @@ export default function ScanAttendance() {
 
       if (existingAttendance && existingAttendance.length > 0) {
         toast.error(`${student.first_name} ${student.last_name} already marked present today`)
+        // Resume scanner after error
+        if (scanner) {
+          setTimeout(() => scanner.resume(), 1000)
+        }
         return
       }
 
@@ -230,6 +255,10 @@ export default function ScanAttendance() {
 
         if (existingEventAttendance && existingEventAttendance.length > 0) {
           toast.error(`${student.first_name} ${student.last_name} already checked in to this event`)
+          // Resume scanner after error
+          if (scanner) {
+            setTimeout(() => scanner.resume(), 1000)
+          }
           return
         }
 
@@ -261,10 +290,19 @@ export default function ScanAttendance() {
         // Refresh attendance data
         fetchTodayAttendance()
       }
+
+      // Resume scanner after successful scan
+      if (scanner) {
+        setTimeout(() => scanner.resume(), 2000) // Wait 2 seconds before resuming
+      }
       
     } catch (error) {
       console.error('Scan processing error:', error)
       toast.error('Error processing scan')
+      // Resume scanner after error
+      if (scanner) {
+        setTimeout(() => scanner.resume(), 1000)
+      }
     }
   }
 
@@ -422,7 +460,8 @@ export default function ScanAttendance() {
                 <div 
                   id="qr-scanner" 
                   ref={scannerRef}
-                  className="mb-4 min-h-[300px] w-full"
+                  className="mb-4 w-full rounded-lg overflow-hidden bg-black"
+                  style={{ minHeight: '350px' }}
                 ></div>
                 <div className="text-center space-y-2">
                   <button
