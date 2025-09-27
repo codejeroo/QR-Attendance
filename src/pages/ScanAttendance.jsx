@@ -191,6 +191,11 @@ export default function ScanAttendance() {
     try {
       setIsProcessing(true)
       
+      // Immediately pause the scanner to prevent multiple detections
+      if (scanner) {
+        scanner.pause()
+      }
+      
       // Extract school_id from QR code
       let schoolId
       
@@ -205,6 +210,16 @@ export default function ScanAttendance() {
       if (!schoolId) {
         toast.error('Invalid QR code format')
         setIsProcessing(false)
+        // Resume scanner
+        if (scanner && isScanning) {
+          setTimeout(() => {
+            try {
+              scanner.resume()
+            } catch (error) {
+              console.error('Error resuming scanner:', error)
+            }
+          }, 500)
+        }
         return
       }
 
@@ -227,6 +242,16 @@ export default function ScanAttendance() {
         toast.error(`Student with ID ${schoolId} not found`)
         setProcessingStudent(null)
         setIsProcessing(false)
+        // Resume scanner
+        if (scanner && isScanning) {
+          setTimeout(() => {
+            try {
+              scanner.resume()
+            } catch (error) {
+              console.error('Error resuming scanner:', error)
+            }
+          }, 500)
+        }
         return
       }
 
@@ -235,6 +260,9 @@ export default function ScanAttendance() {
         ...student, 
         status: 'checking' 
       })
+
+      // Add delay to show the checking animation
+      await new Promise(resolve => setTimeout(resolve, 1500))
 
       // Check if already scanned today (for regular attendance)
       if (!selectedEvent) {
@@ -252,6 +280,16 @@ export default function ScanAttendance() {
           toast.error(`${student.first_name} ${student.last_name} already marked present today`)
           setProcessingStudent(null)
           setIsProcessing(false)
+          // Resume scanner
+          if (scanner && isScanning) {
+            setTimeout(() => {
+              try {
+                scanner.resume()
+              } catch (error) {
+                console.error('Error resuming scanner:', error)
+              }
+            }, 500)
+          }
           return
         }
       }
@@ -271,6 +309,16 @@ export default function ScanAttendance() {
           toast.error(`${student.first_name} ${student.last_name} already checked in to this event`)
           setProcessingStudent(null)
           setIsProcessing(false)
+          // Resume scanner
+          if (scanner && isScanning) {
+            setTimeout(() => {
+              try {
+                scanner.resume()
+              } catch (error) {
+                console.error('Error resuming scanner:', error)
+              }
+            }, 500)
+          }
           return
         }
 
@@ -287,7 +335,7 @@ export default function ScanAttendance() {
 
         setProcessingStudent({ ...student, status: 'success' })
         await new Promise(resolve => setTimeout(resolve, 1000))
-        toast.success(`✅ ${student.first_name} ${student.last_name} checked in to ${selectedEvent.title}`)
+        toast.success(`${student.first_name} ${student.last_name} checked in to ${selectedEvent.title}`)
         
         // Refresh event attendance
         fetchEventAttendance(selectedEvent.id)
@@ -304,7 +352,7 @@ export default function ScanAttendance() {
 
         setProcessingStudent({ ...student, status: 'success' })
         await new Promise(resolve => setTimeout(resolve, 1000))
-        toast.success(`✅ ${student.first_name} ${student.last_name} marked present`)
+        toast.success(`${student.first_name} ${student.last_name} marked present`)
         
         // Refresh attendance data
         fetchTodayAttendance()
@@ -314,6 +362,17 @@ export default function ScanAttendance() {
       setProcessingStudent(null)
       setIsProcessing(false)
       
+      // Resume scanner for next scan
+      if (scanner && isScanning) {
+        setTimeout(() => {
+          try {
+            scanner.resume()
+          } catch (error) {
+            console.error('Error resuming scanner:', error)
+          }
+        }, 500)
+      }
+      
     } catch (error) {
       console.error('Scan processing error:', error)
       setProcessingStudent(prev => prev ? { ...prev, status: 'error' } : null)
@@ -321,6 +380,17 @@ export default function ScanAttendance() {
       toast.error('Error processing scan')
       setProcessingStudent(null)
       setIsProcessing(false)
+      
+      // Resume scanner even on error
+      if (scanner && isScanning) {
+        setTimeout(() => {
+          try {
+            scanner.resume()
+          } catch (error) {
+            console.error('Error resuming scanner:', error)
+          }
+        }, 500)
+      }
     }
   }
 
